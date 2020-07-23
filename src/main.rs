@@ -1,6 +1,7 @@
 use futures::{stream, StreamExt};
 use indicatif::ProgressBar;
 use reqwest;
+use reqwest::header;
 use std::convert::TryInto;
 use std::io;
 use std::io::prelude::*;
@@ -9,9 +10,16 @@ use std::time::{Duration, Instant};
 use tokio;
 
 #[derive(Debug)]
+enum Status {
+    Timeout,
+    Code(String),
+    Unknown,
+}
+
+#[derive(Debug)]
 struct UrlOutcome {
     url: String,
-    status: Result<reqwest::StatusCode, reqwest::Error>,
+    status: Status,
     duration: Duration,
 }
 
@@ -20,9 +28,35 @@ fn urls_from_stdin() -> Vec<String> {
 }
 
 fn build_client_with_timeout(timeout: u64) -> Result<reqwest::Client, reqwest::Error> {
+    let mut headers = header::HeaderMap::new();
+
+    headers.insert(
+        header::USER_AGENT,
+        header::HeaderValue::from_static("URL Verifier"),
+    );
+
     reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout))
+        .default_headers(headers)
         .build()
+}
+
+impl From<Result<reqwest::StatusCode, reqwest::Error>> for Status {
+    fn from(outcome: Result<reqwest::StatusCode, reqwest::Error>) -> Self {
+        match outcome {
+            Ok(status) => Status::Code(status.as_str().into()),
+            Err(e) => {
+                if e.is_timeout() {
+                    Status::Timeout
+                } else {
+                    match e.status() {
+                        Some(status) => Status::Code(status.as_str().into()),
+                        None => Status::Unknown,
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -48,7 +82,7 @@ async fn main() -> Result<(), reqwest::Error> {
 
                 UrlOutcome {
                     url: url.to_string(),
-                    status: result.map(|v| v.status()),
+                    status: result.map(|v| v.status()).into(),
                     duration,
                 }
             }
