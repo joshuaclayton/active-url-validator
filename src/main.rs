@@ -7,7 +7,7 @@ use serde_json;
 use std::convert::TryInto;
 use std::io;
 use std::io::prelude::*;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio;
 
@@ -66,15 +66,13 @@ async fn main() -> Result<(), reqwest::Error> {
     let lines = urls_from_stdin();
     let client = build_client_with_timeout(8)?;
     let inner2: Vec<UrlOutcome> = vec![];
-    let results = Arc::new(Mutex::new(inner2));
-    let bar = Arc::new(Mutex::new(ProgressBar::new(
-        lines.len().try_into().unwrap(),
-    )));
+    let results = Mutex::new(inner2);
+    let bar = Mutex::new(ProgressBar::new(lines.len().try_into().unwrap()));
 
     let statuses = stream::iter(&lines)
         .map(|url| {
             let client = &client;
-            let bar = Arc::clone(&bar);
+            let bar = &bar;
             async move {
                 let start = Instant::now();
                 let result = client.get(&*url).send().await;
@@ -93,7 +91,7 @@ async fn main() -> Result<(), reqwest::Error> {
 
     statuses
         .for_each(|outcome| {
-            let results = Arc::clone(&results);
+            let results = &results;
             async move {
                 let mut inner = results.lock().unwrap();
                 inner.push(outcome);
