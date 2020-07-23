@@ -2,6 +2,8 @@ use futures::{stream, StreamExt};
 use indicatif::ProgressBar;
 use reqwest;
 use reqwest::header;
+use serde::Serialize;
+use serde_json;
 use std::convert::TryInto;
 use std::io;
 use std::io::prelude::*;
@@ -9,14 +11,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 enum Status {
     Timeout,
     Code(String),
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct UrlOutcome {
     url: String,
     status: Status,
@@ -100,6 +102,9 @@ async fn main() -> Result<(), reqwest::Error> {
         .await;
 
     bar.lock().unwrap().finish();
-    println!("final: {:?}", results.lock().unwrap());
+    let outcome = results.lock().unwrap();
+
+    println!("{}", serde_json::to_string(&*outcome).unwrap());
+
     Ok(())
 }
