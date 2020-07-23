@@ -11,14 +11,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio;
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 enum Status {
     Timeout,
     Code(String),
     Unknown,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct UrlOutcome {
     url: String,
     status: Status,
@@ -61,24 +61,58 @@ impl From<Result<reqwest::StatusCode, reqwest::Error>> for Status {
     }
 }
 
+struct UrlProgress(Mutex<ProgressBar>);
+
+impl UrlProgress {
+    pub fn for_urls<T>(urls: &Vec<T>) -> Self {
+        UrlProgress(Mutex::new(ProgressBar::new(urls.len().try_into().unwrap())))
+    }
+
+    pub fn incr(&self) {
+        self.0.lock().unwrap().inc(1)
+    }
+
+    pub fn finish(&self) {
+        self.0.lock().unwrap().finish()
+    }
+}
+
+struct UrlOutcomes(Mutex<Vec<UrlOutcome>>);
+
+impl Default for UrlOutcomes {
+    fn default() -> Self {
+        UrlOutcomes(Mutex::new(vec![]))
+    }
+}
+
+impl UrlOutcomes {
+    fn push(&self, outcome: UrlOutcome) {
+        let mut inner = self.0.lock().unwrap();
+        inner.push(outcome)
+    }
+
+    fn values(&self) -> Vec<UrlOutcome> {
+        self.0.lock().unwrap().to_vec()
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), reqwest::Error> {
     let lines = urls_from_stdin();
     let client = build_client_with_timeout(8)?;
-    let inner2: Vec<UrlOutcome> = vec![];
-    let results = Mutex::new(inner2);
-    let bar = Mutex::new(ProgressBar::new(lines.len().try_into().unwrap()));
+    let outcomes = UrlOutcomes::default();
+    let progress_bar = UrlProgress::for_urls(&lines);
 
     let statuses = stream::iter(&lines)
         .map(|url| {
             let client = &client;
-            let bar = &bar;
+            let bar = &progress_bar;
             async move {
                 let start = Instant::now();
                 let result = client.get(&*url).send().await;
                 let duration = start.elapsed();
 
-                bar.lock().unwrap().inc(1);
+                bar.incr();
 
                 UrlOutcome {
                     url: url.to_string(),
@@ -91,18 +125,16 @@ async fn main() -> Result<(), reqwest::Error> {
 
     statuses
         .for_each(|outcome| {
-            let results = &results;
+            let outcomes = &outcomes;
             async move {
-                let mut inner = results.lock().unwrap();
-                inner.push(outcome);
+                outcomes.push(outcome);
             }
         })
         .await;
 
-    bar.lock().unwrap().finish();
-    let outcome = results.lock().unwrap();
+    progress_bar.finish();
 
-    println!("{}", serde_json::to_string(&*outcome).unwrap());
+    println!("{}", serde_json::to_string(&outcomes.values()).unwrap());
 
     Ok(())
 }
