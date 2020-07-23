@@ -1,29 +1,12 @@
+use active_url_validator::{UrlOutcome, UrlOutcomes, UrlProgress};
 use futures::{stream, StreamExt};
-use indicatif::ProgressBar;
 use reqwest;
 use reqwest::header;
-use serde::Serialize;
 use serde_json;
-use std::convert::TryInto;
 use std::io;
 use std::io::prelude::*;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio;
-
-#[derive(Clone, Debug, Serialize)]
-enum Status {
-    Timeout,
-    Code(String),
-    Unknown,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct UrlOutcome {
-    url: String,
-    status: Status,
-    duration: Duration,
-}
 
 fn urls_from_stdin() -> Vec<String> {
     io::stdin().lock().lines().filter_map(|v| v.ok()).collect()
@@ -41,59 +24,6 @@ fn build_client_with_timeout(timeout: u64) -> Result<reqwest::Client, reqwest::E
         .timeout(Duration::from_secs(timeout))
         .default_headers(headers)
         .build()
-}
-
-impl From<Result<reqwest::StatusCode, reqwest::Error>> for Status {
-    fn from(outcome: Result<reqwest::StatusCode, reqwest::Error>) -> Self {
-        match outcome {
-            Ok(status) => Status::Code(status.as_str().into()),
-            Err(e) => {
-                if e.is_timeout() {
-                    Status::Timeout
-                } else {
-                    match e.status() {
-                        Some(status) => Status::Code(status.as_str().into()),
-                        None => Status::Unknown,
-                    }
-                }
-            }
-        }
-    }
-}
-
-struct UrlProgress(Mutex<ProgressBar>);
-
-impl UrlProgress {
-    pub fn for_urls<T>(urls: &Vec<T>) -> Self {
-        UrlProgress(Mutex::new(ProgressBar::new(urls.len().try_into().unwrap())))
-    }
-
-    pub fn incr(&self) {
-        self.0.lock().unwrap().inc(1)
-    }
-
-    pub fn finish(&self) {
-        self.0.lock().unwrap().finish()
-    }
-}
-
-struct UrlOutcomes(Mutex<Vec<UrlOutcome>>);
-
-impl Default for UrlOutcomes {
-    fn default() -> Self {
-        UrlOutcomes(Mutex::new(vec![]))
-    }
-}
-
-impl UrlOutcomes {
-    fn push(&self, outcome: UrlOutcome) {
-        let mut inner = self.0.lock().unwrap();
-        inner.push(outcome)
-    }
-
-    fn values(&self) -> Vec<UrlOutcome> {
-        self.0.lock().unwrap().to_vec()
-    }
 }
 
 #[tokio::main]
@@ -114,11 +44,7 @@ async fn main() -> Result<(), reqwest::Error> {
 
                 bar.incr();
 
-                UrlOutcome {
-                    url: url.to_string(),
-                    status: result.map(|v| v.status()).into(),
-                    duration,
-                }
+                UrlOutcome::build(url, result, duration)
             }
         })
         .buffer_unordered(20);
