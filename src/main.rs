@@ -29,11 +29,11 @@ fn build_client_with_timeout(timeout: u64) -> Result<reqwest::Client, reqwest::E
 #[tokio::main]
 async fn main() -> Result<(), reqwest::Error> {
     let lines = urls_from_stdin();
-    let client = build_client_with_timeout(8)?;
+    let client = build_client_with_timeout(4)?;
     let outcomes = UrlOutcomes::default();
     let progress_bar = UrlProgress::for_urls(&lines);
 
-    let statuses = stream::iter(&lines)
+    stream::iter(&lines)
         .map(|url| {
             let client = &client;
             let bar = &progress_bar;
@@ -47,9 +47,7 @@ async fn main() -> Result<(), reqwest::Error> {
                 UrlOutcome::build(url, result, duration)
             }
         })
-        .buffer_unordered(20);
-
-    statuses
+        .buffer_unordered(40)
         .for_each(|outcome| {
             let outcomes = &outcomes;
             async move {
@@ -62,5 +60,6 @@ async fn main() -> Result<(), reqwest::Error> {
 
     println!("{}", serde_json::to_string(&outcomes.values()).unwrap());
 
+    std::thread::spawn(move || drop(outcomes));
     Ok(())
 }
