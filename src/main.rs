@@ -39,7 +39,7 @@ async fn main() -> Result<(), reqwest::Error> {
             let bar = &progress_bar;
             async move {
                 let start = Instant::now();
-                let result = client.get(&*url).send().await;
+                let result = client.head(&*url).send().await;
                 let duration = start.elapsed();
 
                 bar.incr();
